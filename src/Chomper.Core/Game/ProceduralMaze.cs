@@ -23,6 +23,7 @@ internal enum MazeDirection
 
 internal static class MazeDirectionExtensions
 {
+    /// <summary>Returns the one-cell offset represented by a direction.</summary>
     public static Point Offset(this MazeDirection direction) => direction switch
     {
         MazeDirection.Up => new Point(0, -1),
@@ -32,6 +33,7 @@ internal static class MazeDirectionExtensions
         _ => Point.Zero
     };
 
+    /// <summary>Converts a cell delta into a cardinal maze direction.</summary>
     public static MazeDirection FromDelta(Point delta)
     {
         if (delta.X > 0) return MazeDirection.Right;
@@ -50,17 +52,20 @@ internal sealed class ProceduralMaze
     private readonly bool[,] walkable = new bool[Width, Height];
     private readonly bool[,] pellets = new bool[Width, Height];
     private readonly bool[,] powerFruit = new bool[Width, Height];
+    private readonly HashSet<Point> ghostHouse = new();
 
     public Point GhostHouseCenter { get; }
     public Point PacmanStart { get; private set; }
     public IReadOnlyList<Point> GhostStarts { get; private set; }
 
+    /// <summary>Creates an empty maze whose cells are populated by Generate.</summary>
     private ProceduralMaze(Point houseCenter)
     {
         GhostHouseCenter = houseCenter;
         GhostStarts = Array.Empty<Point>();
     }
 
+    /// <summary>Generates a deterministic maze for the requested phase and seed.</summary>
     public static ProceduralMaze Generate(int phase, int seed = 739391)
     {
         var center = new Point(Width / 2, Height / 2);
@@ -107,19 +112,24 @@ internal sealed class ProceduralMaze
 
         for (var y = center.Y - 1; y <= center.Y + 1; y++)
         for (var x = center.X - 2; x <= center.X + 2; x++)
+        {
             maze.walkable[x, y] = true;
+            maze.ghostHouse.Add(new Point(x, y));
+        }
+
+        // Keep a walkable one-cell ring around the house so Pac-Man can
+        // route around its perimeter without being forced into the house.
+        for (var y = center.Y - 2; y <= center.Y + 2; y++)
+        for (var x = center.X - 3; x <= center.X + 3; x++)
+            maze.walkable[x, y] = true;
+
         maze.walkable[center.X, center.Y - 2] = true;
         maze.walkable[center.X, center.Y - 3] = true;
         maze.walkable[center.X, center.Y - 4] = true;
 
-        var house = new HashSet<Point>();
-        for (var y = center.Y - 1; y <= center.Y + 1; y++)
-        for (var x = center.X - 2; x <= center.X + 2; x++)
-            house.Add(new Point(x, y));
-
         for (var y = 0; y < Height; y++)
         for (var x = 0; x < Width; x++)
-            maze.pellets[x, y] = maze.walkable[x, y] && !house.Contains(new Point(x, y));
+            maze.pellets[x, y] = maze.walkable[x, y] && !maze.ghostHouse.Contains(new Point(x, y));
 
         var powerPositions = new[]
         {
@@ -139,7 +149,7 @@ internal sealed class ProceduralMaze
             new Point(center.X + 1, center.Y)
         };
         maze.PacmanStart = maze.WalkableCells()
-            .Where(cell => !house.Contains(cell))
+            .Where(cell => !maze.ghostHouse.Contains(cell))
             .OrderByDescending(cell => Math.Abs(cell.X - center.X) + Math.Abs(cell.Y - center.Y))
             .ThenBy(cell => cell.Y)
             .ThenBy(cell => cell.X)
@@ -148,12 +158,19 @@ internal sealed class ProceduralMaze
         return maze;
     }
 
+    /// <summary>Checks whether a cell can be traversed by an actor.</summary>
     public bool IsWalkable(Point cell) => cell.X >= 0 && cell.X < Width && cell.Y >= 0 && cell.Y < Height
         && walkable[cell.X, cell.Y];
 
+    /// <summary>Checks whether Pac-Man may enter a traversable cell.</summary>
+    public bool IsPacmanWalkable(Point cell) => IsWalkable(cell) && !ghostHouse.Contains(cell);
+
+    /// <summary>Checks whether a regular pellet remains at a cell.</summary>
     public bool HasPellet(Point cell) => pellets[cell.X, cell.Y];
+    /// <summary>Checks whether a power fruit remains at a cell.</summary>
     public bool HasPowerFruit(Point cell) => powerFruit[cell.X, cell.Y];
 
+    /// <summary>Counts regular pellets still present in this maze.</summary>
     public int RemainingPelletCount()
     {
         var count = 0;
@@ -162,6 +179,7 @@ internal sealed class ProceduralMaze
         return count;
     }
 
+    /// <summary>Copies remaining pellet positions for checkpoint restoration.</summary>
     public HashSet<Point> RemainingPellets()
     {
         var result = new HashSet<Point>();
@@ -170,12 +188,14 @@ internal sealed class ProceduralMaze
         return result;
     }
 
+    /// <summary>Restores pellets to a previously captured checkpoint.</summary>
     public void RestorePellets(ISet<Point> checkpoint)
     {
         foreach (var cell in WalkableCells())
             pellets[cell.X, cell.Y] = checkpoint.Contains(cell);
     }
 
+    /// <summary>Consumes one regular pellet and reports whether one was present.</summary>
     public bool ConsumePellet(Point cell)
     {
         if (!pellets[cell.X, cell.Y]) return false;
@@ -183,6 +203,7 @@ internal sealed class ProceduralMaze
         return true;
     }
 
+    /// <summary>Consumes one power fruit and reports whether one was present.</summary>
     public bool ConsumePowerFruit(Point cell)
     {
         if (!powerFruit[cell.X, cell.Y]) return false;
@@ -190,6 +211,7 @@ internal sealed class ProceduralMaze
         return true;
     }
 
+    /// <summary>Enumerates every traversable cell in stable row-major order.</summary>
     public IEnumerable<Point> WalkableCells()
     {
         for (var y = 0; y < Height; y++)
@@ -197,6 +219,7 @@ internal sealed class ProceduralMaze
             if (walkable[x, y]) yield return new Point(x, y);
     }
 
+    /// <summary>Enumerates traversable cardinal neighbours of a cell.</summary>
     public IEnumerable<Point> Neighbours(Point cell)
     {
         var directions = new[] { new Point(0, -1), new Point(1, 0), new Point(0, 1), new Point(-1, 0) };
@@ -206,11 +229,27 @@ internal sealed class ProceduralMaze
             if (IsWalkable(next)) yield return next;
         }
     }
+
+    /// <summary>Enumerates neighbours while optionally excluding the ghost house.</summary>
+    public IEnumerable<Point> PacmanNeighbours(Point cell)
+    {
+        foreach (var next in Neighbours(cell))
+            if (IsPacmanWalkable(next)) yield return next;
+    }
+
+    /// <summary>Returns the closest cell that Pac-Man may use as a chase target.</summary>
+    public Point ClosestPacmanCell(Point origin) => WalkableCells()
+        .Where(IsPacmanWalkable)
+        .OrderBy(cell => Math.Abs(cell.X - origin.X) + Math.Abs(cell.Y - origin.Y))
+        .ThenBy(cell => cell.Y)
+        .ThenBy(cell => cell.X)
+        .First();
 }
 
 internal static class MazePathfinding
 {
-    public static MazeDirection AStar(ProceduralMaze maze, Point origin, Point target)
+    /// <summary>Returns the first A* step from an origin toward a target.</summary>
+    public static MazeDirection AStar(ProceduralMaze maze, Point origin, Point target, bool pacmanRoute = false)
     {
         if (origin == target) return MazeDirection.None;
         var frontier = new PriorityQueue<Point, int>();
@@ -222,7 +261,8 @@ internal static class MazePathfinding
         {
             var current = frontier.Dequeue();
             if (current == target) break;
-            foreach (var next in maze.Neighbours(current))
+            var neighbours = pacmanRoute ? maze.PacmanNeighbours(current) : maze.Neighbours(current);
+            foreach (var next in neighbours)
             {
                 var nextCost = cost[current] + 1;
                 if (!cost.TryGetValue(next, out var oldCost) || nextCost < oldCost)
@@ -240,6 +280,7 @@ internal static class MazePathfinding
         return MazeDirectionExtensions.FromDelta(step - origin);
     }
 
+    /// <summary>Returns the neighbouring step that maximizes distance from a threat.</summary>
     public static MazeDirection Flee(ProceduralMaze maze, Point origin, Point threat)
     {
         var result = MazeDirection.None;

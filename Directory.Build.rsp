@@ -1,0 +1,4 @@
+# MonoGame 3.8.6.1 shares the source .mgcb across platform projects.
+# Keep solution builds serial so parallel MGCB invocations cannot race on
+# src/Chomper.Core/Content/obj/*/.mgcontent.
+/m:1

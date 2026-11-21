@@ -12,6 +12,7 @@ internal sealed class OnlineLearningPolicy
     private const float LearningRate = 0.12f;
     private const float Discount = 0.86f;
 
+    /// <summary>Updates the Q-table using one observed transition.</summary>
     public void Learn(string state, MazeDirection action, float reward, string nextState)
     {
         var current = Get(state);
@@ -21,6 +22,7 @@ internal sealed class OnlineLearningPolicy
         current[(int)action] += LearningRate * (reward + Discount * bestNext - current[(int)action]);
     }
 
+    /// <summary>Chooses a learned action with a small exploration probability.</summary>
     public MazeDirection Predict(string state, Random random, float exploration = 0.08f)
     {
         if (random.NextDouble() < exploration) return (MazeDirection)(1 + random.Next(4));
@@ -38,6 +40,7 @@ internal sealed class OnlineLearningPolicy
         return best;
     }
 
+    /// <summary>Gets or creates the action-value row for a state key.</summary>
     private float[] Get(string state)
     {
         if (!values.TryGetValue(state, out var result))

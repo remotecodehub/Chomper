@@ -123,4 +123,43 @@
   <data name="ClickAnywhere" xml:space="preserve">
     <value>Click Anywhere</value>
   </data>
+  <data name="GameTitle"><value>CHOMPER</value></data>
+  <data name="WindowTitlePlaying"><value>Chomper | PHASE {0} | SCORE {1} | PAC-MAN LIVES {2}</value></data>
+  <data name="MenuTitle"><value>MAIN MENU</value></data>
+  <data name="MenuPlay"><value>PLAY</value></data>
+  <data name="MenuTwoPlayers"><value>TWO PLAYERS: {0}</value></data>
+  <data name="MenuDifficulty"><value>DIFFICULTY</value></data>
+  <data name="MenuOptions"><value>OPTIONS</value></data>
+  <data name="MenuControls"><value>CONTROLS</value></data>
+  <data name="MenuQuit"><value>QUIT</value></data>
+  <data name="DifficultyTitle"><value>SELECT DIFFICULTY</value></data>
+  <data name="DifficultyEasy"><value>EASY</value></data>
+  <data name="DifficultyNormal"><value>NORMAL</value></data>
+  <data name="DifficultyHard"><value>HARD</value></data>
+  <data name="OptionsTitle"><value>OPTIONS</value></data>
+  <data name="OptionsHints"><value>HINTS: {0}</value></data>
+  <data name="OptionsFullscreen"><value>FULLSCREEN: {0}</value></data>
+  <data name="OptionsLanguage"><value>LANGUAGE: ENGLISH (RESX)</value></data>
+  <data name="OptionsOn"><value>ON</value></data>
+  <data name="OptionsOff"><value>OFF</value></data>
+  <data name="ControlsTitle"><value>DESKTOP CONTROLS</value></data>
+  <data name="ControlsDesktop"><value>KEYBOARD / GAMEPAD</value></data>
+  <data name="ControlsMobile"><value>TOUCH: SWIPE, DOUBLE TAP, HOLD</value></data>
+  <data name="ControlsMove"><value>MOVE: WASD / ARROWS / LEFT STICK</value></data>
+  <data name="ControlsSwitch"><value>SWITCH: 1 2 3 / TAB</value></data>
+  <data name="ControlsTrap"><value>TRAP: SPACE / {0} / X</value></data>
+  <data name="ControlsConfigure"><value>PRESS ENTER TO CONFIGURE</value></data>
+  <data name="ControlsPressKey"><value>PRESS A KEY (DEMO CONFIGURATION)</value></data>
+  <data name="Back"><value>BACK</value></data>
+  <data name="HudTop"><value>PHASE {0}   PEBBLES: {1}   SCORE: {2:00000}</value></data>
+  <data name="HudStats"><value>PAC-MAN LIVES: {0}   CAPTURES: {1}/3   {2}</value></data>
+  <data name="HudHelpersWait"><value>HELPERS: WAITING FOR {0} PEBBLES</value></data>
+  <data name="HudHelpersReady"><value>HELPERS: RELEASED</value></data>
+  <data name="HudPower"><value>FRUIT: {0:0.0}s  PAC-MAN DUPLICATED</value></data>
+  <data name="HudDesktop"><value>1/2/3: SWITCH   SPACE/F: TRAP</value></data>
+  <data name="HudMobile"><value>MOBILE: SWIPE / DOUBLE TAP / HOLD</value></data>
+  <data name="HudTraps"><value>TRAPS: {0}</value></data>
+  <data name="ReadyMessage"><value>LEAVE THE GHOST HOUSE!</value></data>
+  <data name="GameOverPellets"><value>PAC-MAN ATE ALL PEBBLES - GAME OVER</value></data>
+  <data name="WonCapture"><value>PAC-MAN CAPTURED 3 TIMES! ENTER FOR NEXT PHASE</value></data>
 </root>
