@@ -1,0 +1,30 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/Chomper.Android/Chomper.Android.csproj">
+      <BuildType Solution="*|x64" Project="?" />
+      <Platform Solution="*|x64" Project="?" />
+      <Build Solution="*|x64" Project="false" />
+      <Deploy Solution="*|Any CPU" />
+    </Project>
+    <Project Path="src/Chomper.DesktopGL/Chomper.DesktopGL.csproj">
+      <BuildType Solution="*|x64" Project="?" />
+      <Platform Solution="*|x64" Project="?" />
+      <Build Solution="*|x64" Project="false" />
+    </Project>
+    <Project Path="src/Chomper.iOS/Chomper.iOS.csproj">
+      <BuildType Solution="*|x64" Project="?" />
+      <Platform Solution="*|x64" Project="?" />
+      <Build Solution="*|x64" Project="false" />
+      <Deploy Solution="*|Any CPU" />
+    </Project>
+    <Project Path="src/Chomper.Core/Chomper.Core.csproj">
+      <BuildType Solution="*|x64" Project="?" />
+      <Platform Solution="*|x64" Project="?" />
+      <Build Solution="*|x64" Project="false" />
+    </Project>
+  </Folder>
+</Solution>
