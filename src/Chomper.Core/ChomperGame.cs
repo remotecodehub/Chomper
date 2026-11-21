@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Chomper.Core.Audio;
 using Chomper.Core.Game;
 using Chomper.Core.Localization;
 using Microsoft.Xna.Framework;
@@ -39,6 +40,7 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
     private SpriteBatch spriteBatch;
     private Texture2D pixel;
     private SpriteFont hudFont;
+    private AudioService audioService;
     private ProceduralMaze maze;
     private KeyboardState previousKeyboard;
     private GamePadState previousGamePad;
@@ -219,8 +221,11 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         hudFont = Content.Load<SpriteFont>("Fonts/Hud");
         pixel = new Texture2D(GraphicsDevice, 1, 1);
         pixel.SetData(new[] { RetroPalette.White });
+        audioService = new AudioService(Content);
+        audioService.LoadContent();
         StartPhase(false);
         state = GameState.Menu;
+        audioService.PlayMusic(AudioMusicTrack.Menu);
     }
 
     /// <summary>Creates a seeded phase, resets actors, and applies the selected mode.</summary>
@@ -262,6 +267,8 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         previousGamePadThree = default;
         state = GameState.Playing;
         previousPlayerCell = Selected.Cell;
+        audioService?.PlayMusic(AudioMusicTrack.Gameplay);
+        audioService?.PlayEffect(AudioEffect.GameStart);
     }
 
     /// <summary>Advances menus, input, actors, collectibles, and collision rules.</summary>
@@ -279,6 +286,8 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         {
             state = GameState.PauseConfirmation;
             pauseSelection = 0;
+            audioService?.PlayMusic(AudioMusicTrack.Pause);
+            audioService?.PlayEffect(AudioEffect.MenuConfirm);
             previousKeyboard = keyboard;
             previousGamePad = gamePad;
             previousGamePadTwo = gamePadTwo;
@@ -432,11 +441,14 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
             controlsSelection = (controlsSelection + offset + count) % count;
         else
             pauseSelection = (pauseSelection + offset + count) % count;
+
+        audioService?.PlayEffect(AudioEffect.MenuMove);
     }
 
     /// <summary>Activates the current menu item or toggles its option.</summary>
     private void ActivateFrontEndSelection()
     {
+        audioService?.PlayEffect(AudioEffect.MenuConfirm);
         switch (state)
         {
             case GameState.Menu:
@@ -508,6 +520,8 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         };
         waitingForControl = false;
         waitingForGamepad = false;
+        audioService?.PlayEffect(AudioEffect.MenuBack);
+        audioService?.PlayMusic(state == GameState.Playing ? AudioMusicTrack.Gameplay : AudioMusicTrack.Menu);
     }
 
     /// <summary>Returns the first newly pressed configurable gamepad button.</summary>
@@ -564,6 +578,7 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         state = GameState.Menu;
         waitingForControl = false;
         waitingForGamepad = false;
+        audioService?.PlayMusic(AudioMusicTrack.Menu);
     }
 
     /// <summary>Handles ghost switching, traps, and mobile gestures during gameplay.</summary>
@@ -627,6 +642,8 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
     private void SwitchTo(int index)
     {
         if (index < 0 || index >= ghosts.Count || !ghosts[index].Alive) return;
+        if (selectedGhost != index)
+            audioService?.PlayEffect(AudioEffect.MenuConfirm);
         selectedGhost = index;
         ghosts[index].Released = true;
         ghosts[index].DesiredDirection = MazeDirection.Up;
@@ -667,6 +684,7 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
 
         traps.Add(new TrapFruit(owner.Cell));
         owner.TrapFruitsRemaining--;
+        audioService?.PlayEffect(AudioEffect.Trap);
     }
 
     /// <summary>Reads player two and three gamepads and drives their local co-op ghosts.</summary>
@@ -838,7 +856,11 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
     private void EvaluatePelletGameOver()
     {
         if (state == GameState.Playing && maze.RemainingPelletCount() <= 0)
+        {
             state = GameState.GameOver;
+            audioService?.PlayEffect(AudioEffect.GameOver);
+            audioService?.PlayMusic(AudioMusicTrack.GameOver);
+        }
     }
 
     /// <summary>Checks whether a cell still contains a Chomper objective.</summary>
@@ -912,12 +934,14 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
                 chomper.PelletsSinceAlgorithmChange++;
                 pelletsCollected = pelletCount - maze.RemainingPelletCount();
                 chomper.HasObjective = false;
+                audioService?.PlayEffect(AudioEffect.PelletCollected);
             }
             if (maze.ConsumePowerFruit(chomper.Cell))
             {
                 powerFruitTime = PowerFruitDuration;
                 chomper.PowerTime = PowerFruitDuration;
                 chomper.HasObjective = false;
+                audioService?.PlayEffect(AudioEffect.PowerFruitCollected);
                 if (chompers.Count == 1)
                 {
                     var cloneStart = maze.ChomperStarts.Count > 1 ? maze.ChomperStarts[1] : maze.ChomperStart;
@@ -936,6 +960,7 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
             {
                 traps.Remove(trap);
                 chomper.TrapTime = TrapDuration;
+                audioService?.PlayEffect(AudioEffect.Trap);
             }
         }
     }
@@ -958,11 +983,14 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
             {
                 ghost.Alive = false;
                 ghost.Released = false;
+                audioService?.PlayEffect(AudioEffect.GhostDefeated);
                 if (ReferenceEquals(ghost, Selected)) TransferControlAfterDeath();
                 if (ghosts.All(defeatedGhost => !defeatedGhost.Alive))
                 {
                     allGhostsDefeated = true;
                     state = GameState.GameOver;
+                    audioService?.PlayEffect(AudioEffect.GameOver);
+                    audioService?.PlayMusic(AudioMusicTrack.GameOver);
                     return;
                 }
             }
@@ -975,6 +1003,7 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         chompersCaptured++;
         chomperLives--;
         score += maze.RemainingPelletCount() * 10;
+        audioService?.PlayEffect(AudioEffect.ChomperCaptured);
 
         foreach (var oldChomper in chompers) oldChomper.Alive = false;
         traps.Clear();
@@ -984,6 +1013,8 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         if (chomperLives <= 0)
         {
             state = GameState.Won;
+            audioService?.PlayEffect(AudioEffect.Victory);
+            audioService?.PlayMusic(AudioMusicTrack.Victory);
             return;
         }
 
@@ -1321,6 +1352,7 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
     /// <summary>Releases runtime textures and sprite batching resources.</summary>
     protected override void UnloadContent()
     {
+        audioService?.Dispose();
         pixel?.Dispose();
         spriteBatch?.Dispose();
         base.UnloadContent();
