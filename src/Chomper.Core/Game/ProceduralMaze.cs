@@ -55,13 +55,15 @@ internal sealed class ProceduralMaze
     private readonly HashSet<Point> ghostHouse = new();
 
     public Point GhostHouseCenter { get; }
-    public Point PacmanStart { get; private set; }
+    public Point ChomperStart { get; private set; }
+    public IReadOnlyList<Point> ChomperStarts { get; private set; }
     public IReadOnlyList<Point> GhostStarts { get; private set; }
 
     /// <summary>Creates an empty maze whose cells are populated by Generate.</summary>
     private ProceduralMaze(Point houseCenter)
     {
         GhostHouseCenter = houseCenter;
+        ChomperStarts = Array.Empty<Point>();
         GhostStarts = Array.Empty<Point>();
     }
 
@@ -117,7 +119,7 @@ internal sealed class ProceduralMaze
             maze.ghostHouse.Add(new Point(x, y));
         }
 
-        // Keep a walkable one-cell ring around the house so Pac-Man can
+        // Keep a walkable one-cell ring around the house so Chomper can
         // route around its perimeter without being forced into the house.
         for (var y = center.Y - 2; y <= center.Y + 2; y++)
         for (var x = center.X - 3; x <= center.X + 3; x++)
@@ -131,13 +133,15 @@ internal sealed class ProceduralMaze
         for (var x = 0; x < Width; x++)
             maze.pellets[x, y] = maze.walkable[x, y] && !maze.ghostHouse.Contains(new Point(x, y));
 
-        var powerPositions = new[]
+        // Spread twelve deterministic power fruits through the traversable
+        // map so Chomper has repeated opportunities to become dangerous.
+        var fruitCandidates = maze.WalkableCells()
+            .Where(cell => !maze.ghostHouse.Contains(cell))
+            .ToList();
+        var fruitCount = Math.Min(12, fruitCandidates.Count);
+        for (var i = 0; i < fruitCount; i++)
         {
-            new Point(1, 1), new Point(Width - 2, 1),
-            new Point(1, Height - 2), new Point(Width - 2, Height - 2)
-        };
-        foreach (var power in powerPositions)
-        {
+            var power = fruitCandidates[(i * fruitCandidates.Count) / fruitCount];
             maze.powerFruit[power.X, power.Y] = maze.walkable[power.X, power.Y];
             maze.pellets[power.X, power.Y] = false;
         }
@@ -148,13 +152,23 @@ internal sealed class ProceduralMaze
             new Point(center.X - 1, center.Y),
             new Point(center.X + 1, center.Y)
         };
-        maze.PacmanStart = maze.WalkableCells()
+        var startCandidates = maze.WalkableCells()
             .Where(cell => !maze.ghostHouse.Contains(cell))
+            .Where(cell => !maze.HasPowerFruit(cell))
             .OrderByDescending(cell => Math.Abs(cell.X - center.X) + Math.Abs(cell.Y - center.Y))
             .ThenBy(cell => cell.Y)
             .ThenBy(cell => cell.X)
-            .First();
-        maze.pellets[maze.PacmanStart.X, maze.PacmanStart.Y] = false;
+            .ToList();
+        var firstStart = startCandidates.First();
+        var secondStart = startCandidates
+            .OrderByDescending(cell => Math.Abs(cell.X - firstStart.X) + Math.Abs(cell.Y - firstStart.Y))
+            .ThenBy(cell => cell.Y)
+            .ThenBy(cell => cell.X)
+            .FirstOrDefault(firstStart);
+        maze.ChomperStarts = new[] { firstStart, secondStart };
+        maze.ChomperStart = firstStart;
+        maze.pellets[maze.ChomperStart.X, maze.ChomperStart.Y] = false;
+        maze.pellets[secondStart.X, secondStart.Y] = false;
         return maze;
     }
 
@@ -162,8 +176,8 @@ internal sealed class ProceduralMaze
     public bool IsWalkable(Point cell) => cell.X >= 0 && cell.X < Width && cell.Y >= 0 && cell.Y < Height
         && walkable[cell.X, cell.Y];
 
-    /// <summary>Checks whether Pac-Man may enter a traversable cell.</summary>
-    public bool IsPacmanWalkable(Point cell) => IsWalkable(cell) && !ghostHouse.Contains(cell);
+    /// <summary>Checks whether Chomper may enter a traversable cell.</summary>
+    public bool IsChomperWalkable(Point cell) => IsWalkable(cell) && !ghostHouse.Contains(cell);
 
     /// <summary>Checks whether a regular pellet remains at a cell.</summary>
     public bool HasPellet(Point cell) => pellets[cell.X, cell.Y];
@@ -230,16 +244,16 @@ internal sealed class ProceduralMaze
         }
     }
 
-    /// <summary>Enumerates neighbours while optionally excluding the ghost house.</summary>
-    public IEnumerable<Point> PacmanNeighbours(Point cell)
+    /// <summary>Enumerates neighbours while excluding the ghost house.</summary>
+    public IEnumerable<Point> ChomperNeighbours(Point cell)
     {
         foreach (var next in Neighbours(cell))
-            if (IsPacmanWalkable(next)) yield return next;
+            if (IsChomperWalkable(next)) yield return next;
     }
 
-    /// <summary>Returns the closest cell that Pac-Man may use as a chase target.</summary>
-    public Point ClosestPacmanCell(Point origin) => WalkableCells()
-        .Where(IsPacmanWalkable)
+    /// <summary>Returns the closest cell that Chomper may use as a chase target.</summary>
+    public Point ClosestChomperCell(Point origin) => WalkableCells()
+        .Where(IsChomperWalkable)
         .OrderBy(cell => Math.Abs(cell.X - origin.X) + Math.Abs(cell.Y - origin.Y))
         .ThenBy(cell => cell.Y)
         .ThenBy(cell => cell.X)
@@ -249,7 +263,7 @@ internal sealed class ProceduralMaze
 internal static class MazePathfinding
 {
     /// <summary>Returns the first A* step from an origin toward a target.</summary>
-    public static MazeDirection AStar(ProceduralMaze maze, Point origin, Point target, bool pacmanRoute = false)
+    public static MazeDirection AStar(ProceduralMaze maze, Point origin, Point target, bool chomperRoute = false)
     {
         if (origin == target) return MazeDirection.None;
         var frontier = new PriorityQueue<Point, int>();
@@ -261,7 +275,7 @@ internal static class MazePathfinding
         {
             var current = frontier.Dequeue();
             if (current == target) break;
-            var neighbours = pacmanRoute ? maze.PacmanNeighbours(current) : maze.Neighbours(current);
+            var neighbours = chomperRoute ? maze.ChomperNeighbours(current) : maze.Neighbours(current);
             foreach (var next in neighbours)
             {
                 var nextCost = cost[current] + 1;

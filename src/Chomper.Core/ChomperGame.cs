@@ -11,7 +11,7 @@ using Microsoft.Xna.Framework.Input.Touch;
 namespace Chomper.Core;
 
 /// <summary>
-/// Reversed Pac-Man gameplay: the player controls one of three ghosts and the
+/// Reversed Chomper gameplay: the player controls one of three ghosts and the
 /// other living ghosts become NPC allies. The maze and all gameplay sprites are
 /// generated at runtime; no Tiled map or gameplay image is required.
 /// </summary>
@@ -24,16 +24,16 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
     private const float PowerFruitDuration = 8f;
     private const float NormalGhostSpeed = 64f;
     private const float TrapDuration = 4f;
-    private const int PacmanLives = 3;
+    private const int ChomperLives = 3;
     private const int TrapFruitsPerGhost = 3;
     private const int AlgorithmSwitchEveryPellets = 8;
 
     private readonly GraphicsDeviceManager graphics;
     private readonly Random random = new(51937);
     private readonly OnlineLearningPolicy ghostPolicy = new();
-    private readonly OnlineLearningPolicy pacmanPolicy = new();
+    private readonly OnlineLearningPolicy chomperPolicy = new();
     private readonly List<Ghost> ghosts = new();
-    private readonly List<Pacman> pacmen = new();
+    private readonly List<Chomper> chompers = new();
     private readonly List<TrapFruit> traps = new();
 
     private SpriteBatch spriteBatch;
@@ -43,30 +43,39 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
     private KeyboardState previousKeyboard;
     private GamePadState previousGamePad;
     private GamePadState previousGamePadTwo;
+    private GamePadState previousGamePadThree;
     private int phase;
     private int selectedGhost;
     private int score;
     private int pelletsCollected;
     private int pelletCount;
-    private int pacmanLives;
-    private int pacmenCaptured;
+    private int chomperLives;
+    private int chompersCaptured;
+    private bool allGhostsDefeated;
     private int releaseThreshold;
-    private int nextCheckpointPellets;
     private float helpersUnlockedAt = -1f;
-    private HashSet<Point> checkpointRemainingPellets = new();
     private float elapsed;
     private float powerFruitTime;
-    private NavigationAlgorithm pacmanAlgorithm = NavigationAlgorithm.AStar;
+    private NavigationAlgorithm chomperAlgorithm = NavigationAlgorithm.AStar;
     private GameState state;
     private Point previousPlayerCell;
     private MazeDirection swipeDirection;
     private int menuSelection;
     private int difficultySelection = 1;
     private int optionsSelection;
+    private int controlsSelection;
+    private int pauseSelection;
     private bool hintsEnabled = true;
     private bool fullscreenEnabled;
     private bool waitingForControl;
-    private bool twoPlayers;
+    private bool waitingForGamepad;
+    private int playerCount = 1;
+    private GameSettings settings = new();
+    private Buttons ghostOneButton = Buttons.A;
+    private Buttons ghostTwoButton = Buttons.B;
+    private Buttons ghostThreeButton = Buttons.Y;
+    private Buttons trapButton = Buttons.X;
+    private Buttons pauseButton = Buttons.Start;
     private Keys trapKey = Keys.F;
     private DifficultyLevel difficulty = DifficultyLevel.Normal;
 
@@ -82,6 +91,7 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         Difficulty,
         Options,
         Controls,
+        PauseConfirmation,
         Playing,
         GameOver,
         Won
@@ -103,10 +113,10 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         DifficultyLevel.Hard => 76f,
         _ => NormalGhostSpeed
     };
-    /// <summary>Returns Pac-Man's normal chase speed relative to the ghosts.</summary>
-    private float PacmanSpeed => GhostSpeed * 1.75f;
-    /// <summary>Returns Pac-Man's speed while affected by a trap fruit.</summary>
-    private float TrappedPacmanSpeed => GhostSpeed * .5f;
+    /// <summary>Returns Chomper's normal chase speed relative to the ghosts.</summary>
+    private float ChomperSpeed => GhostSpeed * 1.75f;
+    /// <summary>Returns Chomper's speed while affected by a trap fruit.</summary>
+    private float TrappedChomperSpeed => GhostSpeed * .5f;
 
     private abstract class Actor
     {
@@ -144,18 +154,21 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         }
     }
 
-    private sealed class Pacman : Actor
+    private sealed class Chomper : Actor
     {
         public Color Color { get; }
         public int PelletsSinceAlgorithmChange;
         public float PowerTime;
         public float TrapTime;
+        public Point ObjectiveCell;
+        public bool HasObjective;
+        public Queue<Point> RecentCells { get; } = new();
 
         /// <summary>Indicates whether a power fruit or trap currently permits capture.</summary>
         public bool IsVulnerable => PowerTime > 0f || TrapTime > 0f;
 
-        /// <summary>Creates a Pac-Man actor at a maze cell.</summary>
-        public Pacman(Color color, Point cell) : base(cell) => Color = color;
+        /// <summary>Creates a Chomper actor at a maze cell.</summary>
+        public Chomper(Color color, Point cell) : base(cell) => Color = color;
     }
 
     private sealed class TrapFruit
@@ -181,9 +194,22 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
     /// <summary>Initializes localization and touch gestures for the current platform.</summary>
     protected override void Initialize()
     {
+        settings = GameSettingsStore.Load();
+        hintsEnabled = settings.HintsEnabled;
+        fullscreenEnabled = settings.FullscreenEnabled;
+        ghostOneButton = (Buttons)settings.GhostOneButton;
+        ghostTwoButton = (Buttons)settings.GhostTwoButton;
+        ghostThreeButton = (Buttons)settings.GhostThreeButton;
+        trapButton = (Buttons)settings.TrapButton;
+        pauseButton = (Buttons)settings.PauseButton;
+        trapKey = (Keys)settings.TrapKey;
+        graphics.IsFullScreen = IsMobile || fullscreenEnabled;
         LocalizationManager.SetCulture(LocalizationManager.DEFAULT_CULTURE_CODE);
         TouchPanel.EnabledGestures = GestureType.Flick | GestureType.Tap | GestureType.DoubleTap | GestureType.Hold;
         base.Initialize();
+        // The graphics device is ready only after base.Initialize; apply the
+        // persisted desktop mode here so a new process starts fullscreen.
+        if (!IsMobile) graphics.ApplyChanges();
     }
 
     /// <summary>Loads the Array font and creates runtime-only pixel primitives.</summary>
@@ -203,7 +229,7 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         if (nextPhase) phase = (phase + 1) % 7;
         maze = ProceduralMaze.Generate(phase);
         ghosts.Clear();
-        pacmen.Clear();
+        chompers.Clear();
         traps.Clear();
         ghosts.Add(new Ghost("VERDE", RetroPalette.Green, NavigationAlgorithm.AStar,
             maze.GhostStarts[0], 0f));
@@ -211,28 +237,29 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
             maze.GhostStarts[1], 2.5f));
         ghosts.Add(new Ghost("AZUL", RetroPalette.Blue, NavigationAlgorithm.FiniteStateMachine,
             maze.GhostStarts[2], 4.5f));
-        ghosts[0].Player = PlayerIndex.One;
-        ghosts[1].Player = twoPlayers ? PlayerIndex.Two : null;
+        ghosts[0].Player = playerCount >= 1 ? PlayerIndex.One : null;
+        ghosts[1].Player = playerCount >= 2 ? PlayerIndex.Two : null;
+        ghosts[2].Player = playerCount >= 3 ? PlayerIndex.Three : null;
         foreach (var ghost in ghosts) ghost.Position = CellToWorld(ghost.Cell);
 
-        pacmen.Add(new Pacman(RetroPalette.Red, maze.PacmanStart));
-        pacmen[0].Position = CellToWorld(maze.PacmanStart);
+        chompers.Add(new Chomper(RetroPalette.Red, maze.ChomperStarts[0]));
+        chompers[0].Position = CellToWorld(maze.ChomperStarts[0]);
         pelletCount = maze.WalkableCells().Count(maze.HasPellet);
-        checkpointRemainingPellets = maze.RemainingPellets();
         releaseThreshold = Math.Max(1, (int)Math.Ceiling(pelletCount * .25f));
-        nextCheckpointPellets = releaseThreshold;
         helpersUnlockedAt = -1f;
-        pacmanLives = PacmanLives;
-        pacmenCaptured = 0;
+        chomperLives = ChomperLives;
+        chompersCaptured = 0;
+        allGhostsDefeated = false;
         selectedGhost = 0;
         score = 0;
         pelletsCollected = 0;
         elapsed = 0f;
         powerFruitTime = 0f;
-        pacmanAlgorithm = NavigationAlgorithm.AStar;
+        chomperAlgorithm = NavigationAlgorithm.AStar;
         swipeDirection = MazeDirection.None;
         previousGamePad = default;
         previousGamePadTwo = default;
+        previousGamePadThree = default;
         state = GameState.Playing;
         previousPlayerCell = Selected.Cell;
     }
@@ -243,17 +270,30 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         var keyboard = Keyboard.GetState();
         var gamePad = IsMobile ? default : GamePad.GetState(PlayerIndex.One);
         var gamePadTwo = IsMobile ? default : GamePad.GetState(PlayerIndex.Two);
-        if (!IsMobile && (keyboard.IsKeyDown(Keys.Escape) || gamePad.Buttons.Back == ButtonState.Pressed))
+        var gamePadThree = IsMobile ? default : GamePad.GetState(PlayerIndex.Three);
+        var pausePressed = !IsMobile &&
+            ((keyboard.IsKeyDown(Keys.Escape) && previousKeyboard.IsKeyUp(Keys.Escape)) ||
+             (gamePad.IsButtonDown(pauseButton) && previousGamePad.IsButtonUp(pauseButton)) ||
+             (gamePad.IsButtonDown(Buttons.Back) && previousGamePad.IsButtonUp(Buttons.Back)));
+        if (state == GameState.Playing && pausePressed)
         {
-            Exit();
+            state = GameState.PauseConfirmation;
+            pauseSelection = 0;
+            previousKeyboard = keyboard;
+            previousGamePad = gamePad;
+            previousGamePadTwo = gamePadTwo;
+            previousGamePadThree = gamePadThree;
+            base.Update(gameTime);
             return;
         }
 
-        if (state is GameState.Menu or GameState.Difficulty or GameState.Options or GameState.Controls)
+        if (state is GameState.Menu or GameState.Difficulty or GameState.Options or GameState.Controls or GameState.PauseConfirmation)
         {
             UpdateFrontEnd(keyboard, gamePad);
             previousKeyboard = keyboard;
             previousGamePad = gamePad;
+            previousGamePadTwo = gamePadTwo;
+            previousGamePadThree = gamePadThree;
             base.Update(gameTime);
             return;
         }
@@ -272,24 +312,24 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         elapsed += delta;
         powerFruitTime = Math.Max(0f, powerFruitTime - delta);
         HandleSwitchInput(keyboard, gamePad);
-        HandleSecondPlayerInput(gamePadTwo);
+        HandleAdditionalPlayerInput(gamePadTwo, gamePadThree);
         ReleaseGhosts();
 
         Selected.DesiredDirection = ReadPlayerDirection();
         LearnFromPlayer();
         UpdateGhosts(delta);
-        UpdatePacmen(delta);
-        CollectPacmanItems();
+        UpdateChompers(delta);
+        CollectChomperItems();
         ResolveCollisions();
 
         pelletsCollected = pelletCount - maze.RemainingPelletCount();
-        if (state == GameState.Playing && maze.RemainingPelletCount() == 0)
-            state = GameState.GameOver;
+        EvaluatePelletGameOver();
 
         previousKeyboard = keyboard;
         previousGamePad = gamePad;
         previousGamePadTwo = gamePadTwo;
-        Window.Title = GameText.Format("WindowTitlePlaying", phase + 1, score, pacmanLives);
+        previousGamePadThree = gamePadThree;
+        Window.Title = GameText.Format("WindowTitlePlaying", phase + 1, score, chomperLives);
         base.Update(gameTime);
     }
 
@@ -317,7 +357,19 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
                 if (key is Keys.Enter or Keys.Escape || !keyboard.IsKeyDown(key) || !previousKeyboard.IsKeyUp(key)) continue;
                 trapKey = key;
                 waitingForControl = false;
+                PersistSettings();
                 break;
+            }
+        }
+        if (state == GameState.Controls && waitingForGamepad && !IsMobile)
+        {
+            var assignedButton = FirstNewGamepadButton(gamePad);
+            if (assignedButton != Buttons.None)
+            {
+                AssignGamepadButton(assignedButton);
+                waitingForGamepad = false;
+                PersistSettings();
+                gamePad = default;
             }
         }
         var movedUp = !IsMobile &&
@@ -331,7 +383,9 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
              (gamePad.IsButtonDown(Buttons.A) && previousGamePad.IsButtonUp(Buttons.A)));
         var back = !IsMobile &&
             ((keyboard.IsKeyDown(Keys.Back) && previousKeyboard.IsKeyUp(Keys.Back)) ||
-             (gamePad.IsButtonDown(Buttons.B) && previousGamePad.IsButtonUp(Buttons.B)));
+             (keyboard.IsKeyDown(Keys.Escape) && previousKeyboard.IsKeyUp(Keys.Escape)) ||
+             (gamePad.IsButtonDown(Buttons.B) && previousGamePad.IsButtonUp(Buttons.B)) ||
+             (gamePad.IsButtonDown(Buttons.Back) && previousGamePad.IsButtonUp(Buttons.Back)));
 
         while (TouchPanel.IsGestureAvailable)
         {
@@ -361,18 +415,23 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
     {
         var count = state switch
         {
-            GameState.Menu => IsMobile ? 4 : 6,
-            GameState.Difficulty => 3,
-            GameState.Options => 3,
-            GameState.Controls => 3,
+            GameState.Menu => 5,
+            GameState.Difficulty => 4,
+            GameState.Options => 4,
+            GameState.Controls => 7,
+            GameState.PauseConfirmation => 3,
             _ => 1
         };
         if (state == GameState.Menu)
             menuSelection = (menuSelection + offset + count) % count;
         else if (state == GameState.Difficulty)
             difficultySelection = (difficultySelection + offset + count) % count;
-        else
+        else if (state == GameState.Options)
             optionsSelection = (optionsSelection + offset + count) % count;
+        else if (state == GameState.Controls)
+            controlsSelection = (controlsSelection + offset + count) % count;
+        else
+            pauseSelection = (pauseSelection + offset + count) % count;
     }
 
     /// <summary>Activates the current menu item or toggles its option.</summary>
@@ -383,33 +442,57 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
             case GameState.Menu:
                 switch (menuSelection)
                 {
-                    case 0: StartPhase(false); break;
-                    case 1 when !IsMobile: twoPlayers = !twoPlayers; break;
-                    case 2 when !IsMobile: state = GameState.Difficulty; difficultySelection = (int)difficulty; break;
-                    case 1 when IsMobile: state = GameState.Difficulty; difficultySelection = (int)difficulty; break;
-                    case 3 when !IsMobile: state = GameState.Options; optionsSelection = 0; break;
-                    case 2 when IsMobile: state = GameState.Options; optionsSelection = 0; break;
-                    case 4 when !IsMobile: state = GameState.Controls; optionsSelection = 0; break;
-                    case 3 when IsMobile: Exit(); break;
-                    case 5 when !IsMobile: Exit(); break;
+                    case 0: playerCount = 1; state = GameState.Difficulty; difficultySelection = (int)difficulty; break;
+                    case 1: playerCount = 2; state = GameState.Difficulty; difficultySelection = (int)difficulty; break;
+                    case 2: playerCount = 3; state = GameState.Difficulty; difficultySelection = (int)difficulty; break;
+                    case 3: state = GameState.Options; optionsSelection = 0; break;
+                    case 4: Exit(); break;
                 }
                 break;
             case GameState.Difficulty:
-                difficulty = (DifficultyLevel)difficultySelection;
-                StartPhase(false);
+                if (difficultySelection == 3)
+                    state = GameState.Menu;
+                else
+                {
+                    difficulty = (DifficultyLevel)difficultySelection;
+                    StartPhase(false);
+                }
                 break;
             case GameState.Options:
-                if (optionsSelection == 0) hintsEnabled = !hintsEnabled;
+                if (optionsSelection == 0)
+                {
+                    hintsEnabled = !hintsEnabled;
+                    PersistSettings();
+                }
                 else if (optionsSelection == 1)
                 {
                     fullscreenEnabled = !fullscreenEnabled;
-                    graphics.IsFullScreen = fullscreenEnabled;
+                    graphics.IsFullScreen = IsMobile || fullscreenEnabled;
+                    if (!IsMobile) graphics.ApplyChanges();
+                    PersistSettings();
+                }
+                else if (optionsSelection == 2)
+                {
+                    state = GameState.Controls;
+                    controlsSelection = 0;
                 }
                 else state = GameState.Menu;
                 break;
             case GameState.Controls:
-                if (optionsSelection == 2) state = GameState.Menu;
-                else waitingForControl = !waitingForControl;
+                if (controlsSelection == 6)
+                    state = GameState.Options;
+                else if (controlsSelection == 0)
+                    waitingForControl = !waitingForControl;
+                else
+                    waitingForGamepad = !waitingForGamepad;
+                break;
+            case GameState.PauseConfirmation:
+                if (pauseSelection == 0)
+                    SaveProgressAndReturnToMenu();
+                else if (pauseSelection == 1)
+                    ReturnToMenuWithoutSaving();
+                else
+                    state = GameState.Playing;
                 break;
         }
     }
@@ -417,8 +500,70 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
     /// <summary>Returns from a child front-end screen to the main menu.</summary>
     private void GoBackFromFrontEnd()
     {
-        state = state == GameState.Menu ? GameState.Menu : GameState.Menu;
+        state = state switch
+        {
+            GameState.PauseConfirmation => GameState.Playing,
+            GameState.Controls => GameState.Options,
+            _ => GameState.Menu
+        };
         waitingForControl = false;
+        waitingForGamepad = false;
+    }
+
+    /// <summary>Returns the first newly pressed configurable gamepad button.</summary>
+    private Buttons FirstNewGamepadButton(GamePadState gamePad)
+    {
+        var candidates = new[]
+        {
+            Buttons.A, Buttons.B, Buttons.X, Buttons.Y,
+            Buttons.LeftShoulder, Buttons.RightShoulder, Buttons.Start, Buttons.Back
+        };
+        foreach (var button in candidates)
+            if (gamePad.IsButtonDown(button) && previousGamePad.IsButtonUp(button)) return button;
+        return Buttons.None;
+    }
+
+    /// <summary>Assigns the captured gamepad button to the selected control action.</summary>
+    private void AssignGamepadButton(Buttons button)
+    {
+        switch (controlsSelection)
+        {
+            case 1: ghostOneButton = button; break;
+            case 2: ghostTwoButton = button; break;
+            case 3: ghostThreeButton = button; break;
+            case 4: trapButton = button; break;
+            case 5: pauseButton = button; break;
+        }
+    }
+
+    /// <summary>Copies current preferences to the persistent settings store.</summary>
+    private void PersistSettings()
+    {
+        settings.FullscreenEnabled = fullscreenEnabled;
+        settings.HintsEnabled = hintsEnabled;
+        settings.GhostOneButton = (int)ghostOneButton;
+        settings.GhostTwoButton = (int)ghostTwoButton;
+        settings.GhostThreeButton = (int)ghostThreeButton;
+        settings.TrapButton = (int)trapButton;
+        settings.PauseButton = (int)pauseButton;
+        settings.TrapKey = (int)trapKey;
+        GameSettingsStore.Save(settings);
+    }
+
+    /// <summary>Saves the current phase snapshot and returns to the main menu.</summary>
+    private void SaveProgressAndReturnToMenu()
+    {
+        GameSettingsStore.SaveProgress(phase, score, playerCount, (int)difficulty,
+            maze.RemainingPellets().Select(cell => $"{cell.X},{cell.Y}"));
+        ReturnToMenuWithoutSaving();
+    }
+
+    /// <summary>Returns to the main menu without writing a gameplay snapshot.</summary>
+    private void ReturnToMenuWithoutSaving()
+    {
+        state = GameState.Menu;
+        waitingForControl = false;
+        waitingForGamepad = false;
     }
 
     /// <summary>Handles ghost switching, traps, and mobile gestures during gameplay.</summary>
@@ -426,14 +571,20 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
     {
         if (!IsMobile)
         {
-            if (keyboard.IsKeyDown(Keys.D1) && previousKeyboard.IsKeyUp(Keys.D1)) SwitchTo(0);
-            if (keyboard.IsKeyDown(Keys.D2) && previousKeyboard.IsKeyUp(Keys.D2)) SwitchTo(1);
-            if (keyboard.IsKeyDown(Keys.D3) && previousKeyboard.IsKeyUp(Keys.D3)) SwitchTo(2);
-            if (keyboard.IsKeyDown(Keys.Tab) && previousKeyboard.IsKeyUp(Keys.Tab)) SwitchToNext();
+            if (playerCount == 1)
+            {
+                if (keyboard.IsKeyDown(Keys.D1) && previousKeyboard.IsKeyUp(Keys.D1)) SwitchTo(0);
+                if (keyboard.IsKeyDown(Keys.D2) && previousKeyboard.IsKeyUp(Keys.D2)) SwitchTo(1);
+                if (keyboard.IsKeyDown(Keys.D3) && previousKeyboard.IsKeyUp(Keys.D3)) SwitchTo(2);
+                if (keyboard.IsKeyDown(Keys.Tab) && previousKeyboard.IsKeyUp(Keys.Tab)) SwitchToNext();
+                if (gamePad.IsButtonDown(ghostOneButton) && previousGamePad.IsButtonUp(ghostOneButton)) SwitchTo(0);
+                if (gamePad.IsButtonDown(ghostTwoButton) && previousGamePad.IsButtonUp(ghostTwoButton)) SwitchTo(1);
+                if (gamePad.IsButtonDown(ghostThreeButton) && previousGamePad.IsButtonUp(ghostThreeButton)) SwitchTo(2);
+            }
             if ((keyboard.IsKeyDown(Keys.Space) && previousKeyboard.IsKeyUp(Keys.Space))
                 || (keyboard.IsKeyDown(trapKey) && previousKeyboard.IsKeyUp(trapKey))
-                || (gamePad.IsButtonDown(Buttons.X) && previousGamePad.IsButtonUp(Buttons.X)))
-                TryDropTrap();
+                || (gamePad.IsButtonDown(trapButton) && previousGamePad.IsButtonUp(trapButton)))
+                TryDropTrap(Selected);
         }
 
         while (TouchPanel.IsGestureAvailable)
@@ -446,14 +597,14 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
             }
             if (gesture.GestureType is GestureType.Hold or GestureType.DoubleTap)
             {
-                if (IsMobile) TryDropTrap();
+                if (IsMobile) TryDropTrap(Selected);
                 continue;
             }
             if (gesture.GestureType != GestureType.Tap) continue;
             var logical = ToLogical(gesture.Position);
             var x = logical.X;
             var y = logical.Y;
-            if (y <= OriginY && x >= 12 && x <= 168)
+            if (playerCount == 1 && y <= OriginY && x >= 12 && x <= 168)
                 SwitchTo(MathHelper.Clamp((int)((x - 12) / 52), 0, 2));
         }
     }
@@ -493,7 +644,9 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
             var ghost = ghosts[i];
             var canLeave = i == 0
                 ? elapsed >= ReadyDelay
-                : helpersUnlockedAt >= 0f && elapsed >= helpersUnlockedAt + ReadyDelay + ghost.ReleaseDelay;
+                : ghost.Player is not null
+                    ? elapsed >= ReadyDelay + ghost.ReleaseDelay
+                    : helpersUnlockedAt >= 0f && elapsed >= helpersUnlockedAt + ReadyDelay + ghost.ReleaseDelay;
             if (!ghost.Released && canLeave)
             {
                 ghost.Released = true;
@@ -503,24 +656,34 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
     }
 
     /// <summary>Places a limited trap fruit at the selected ghost cell.</summary>
-    private void TryDropTrap()
+    private void TryDropTrap(Ghost owner)
     {
-        if (!Selected.Alive || !Selected.Released || Selected.TrapFruitsRemaining <= 0)
+        if (!owner.Alive || !owner.Released || owner.TrapFruitsRemaining <= 0)
             return;
-        if (traps.Any(trap => trap.Cell == Selected.Cell))
+        if (!maze.IsChomperWalkable(owner.Cell))
+            return;
+        if (traps.Any(trap => trap.Cell == owner.Cell))
             return;
 
-        traps.Add(new TrapFruit(Selected.Cell));
-        Selected.TrapFruitsRemaining--;
+        traps.Add(new TrapFruit(owner.Cell));
+        owner.TrapFruitsRemaining--;
     }
 
-    /// <summary>Reads the second desktop gamepad and drives the yellow ghost in local co-op.</summary>
-    /// <summary>Reads player two's gamepad and drives the local co-op ghost.</summary>
-    private void HandleSecondPlayerInput(GamePadState gamePad)
+    /// <summary>Reads player two and three gamepads and drives their local co-op ghosts.</summary>
+    private void HandleAdditionalPlayerInput(GamePadState gamePadTwo, GamePadState gamePadThree)
     {
-        if (IsMobile || !twoPlayers || ghosts.Count < 2 || !ghosts[1].Alive) return;
+        if (IsMobile) return;
+        HandlePlayerGhostInput(1, gamePadTwo);
+        HandlePlayerGhostInput(2, gamePadThree);
+    }
+
+    /// <summary>Applies movement and trap input from one local co-op player.</summary>
+    private void HandlePlayerGhostInput(int ghostIndex, GamePadState gamePad)
+    {
+        if (ghostIndex >= playerCount || ghostIndex >= ghosts.Count || !ghosts[ghostIndex].Alive) return;
         var direction = ReadGamePadDirection(gamePad);
-        if (direction != MazeDirection.None) ghosts[1].DesiredDirection = direction;
+        if (direction != MazeDirection.None) ghosts[ghostIndex].DesiredDirection = direction;
+        if (gamePad.IsButtonDown(trapButton)) TryDropTrap(ghosts[ghostIndex]);
     }
 
     /// <summary>Maps a gamepad D-pad or left stick vector to a maze direction.</summary>
@@ -559,15 +722,25 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         ? (delta.X >= 0 ? MazeDirection.Right : MazeDirection.Left)
         : (delta.Y >= 0 ? MazeDirection.Down : MazeDirection.Up);
 
+    /// <summary>Returns the direction that would immediately reverse movement.</summary>
+    private static MazeDirection Opposite(MazeDirection direction) => direction switch
+    {
+        MazeDirection.Up => MazeDirection.Down,
+        MazeDirection.Right => MazeDirection.Left,
+        MazeDirection.Down => MazeDirection.Up,
+        MazeDirection.Left => MazeDirection.Right,
+        _ => MazeDirection.None
+    };
+
     /// <summary>Trains the ghost policy from the primary player's latest action.</summary>
     private void LearnFromPlayer()
     {
         if (!Selected.Released || Selected.DesiredDirection == MazeDirection.None) return;
-        var stateKey = BuildState(Selected.Cell, NearestPacman(Selected.Cell));
+        var stateKey = BuildState(Selected.Cell, NearestChomper(Selected.Cell));
         var next = Selected.Cell + Selected.DesiredDirection.Offset();
         var reward = maze.IsWalkable(next) ? .2f : -.35f;
         ghostPolicy.Learn(stateKey, Selected.DesiredDirection, reward,
-            BuildState(next, NearestPacman(next)));
+            BuildState(next, NearestChomper(next)));
         if (previousPlayerCell != Selected.Cell) previousPlayerCell = Selected.Cell;
     }
 
@@ -579,7 +752,7 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
             if (!ghost.Alive || !ghost.Released) continue;
             if (ghost != Selected && ghost.Player is null && !ghost.IsMoving)
             {
-                var target = NearestPacman(ghost.Cell);
+                var target = NearestChomper(ghost.Cell);
                 var strategy = ghost.Algorithm switch
                 {
                     NavigationAlgorithm.AStar => MazePathfinding.AStar(maze, ghost.Cell, target),
@@ -599,39 +772,103 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
     /// <summary>Computes the nearest-target step used by the TSP strategy.</summary>
     private MazeDirection TspStep(Ghost ghost)
     {
-        var target = pacmen.Where(p => p.Alive).OrderBy(p => Manhattan(ghost.Cell, p.Cell)).FirstOrDefault();
+        var target = chompers.Where(p => p.Alive).OrderBy(p => Manhattan(ghost.Cell, p.Cell)).FirstOrDefault();
         return target == null ? MazeDirection.None : MazePathfinding.AStar(maze, ghost.Cell, target.Cell);
     }
 
-    /// <summary>Updates every Pac-Man clone and alternates its navigation policy.</summary>
-    private void UpdatePacmen(float delta)
+    /// <summary>Updates every Chomper clone and alternates its navigation policy.</summary>
+    private void UpdateChompers(float delta)
     {
-        foreach (var pacman in pacmen.Where(p => p.Alive).ToList())
+        foreach (var chomper in chompers.Where(p => p.Alive).ToList())
         {
-            pacman.PowerTime = Math.Max(0f, pacman.PowerTime - delta);
-            pacman.TrapTime = Math.Max(0f, pacman.TrapTime - delta);
-            if (!pacman.IsMoving)
+            chomper.PowerTime = Math.Max(0f, chomper.PowerTime - delta);
+            chomper.TrapTime = Math.Max(0f, chomper.TrapTime - delta);
+            if (!chomper.IsMoving)
             {
-                var target = ghosts.Where(g => g.Alive).OrderBy(g => Manhattan(pacman.Cell, g.Cell)).FirstOrDefault();
-                if (target == null) continue;
-                if (pacman.PelletsSinceAlgorithmChange >= AlgorithmSwitchEveryPellets)
+                if (chomper.PelletsSinceAlgorithmChange >= AlgorithmSwitchEveryPellets)
                 {
-                    pacmanAlgorithm = (NavigationAlgorithm)random.Next(3);
-                    pacman.PelletsSinceAlgorithmChange = 0;
+                    chomperAlgorithm = (NavigationAlgorithm)random.Next(3);
+                    chomper.PelletsSinceAlgorithmChange = 0;
                 }
-                var trap = traps.OrderBy(item => Manhattan(pacman.Cell, item.Cell)).FirstOrDefault();
-                var targetCell = trap?.Cell ?? target.Cell;
-                if (!maze.IsPacmanWalkable(targetCell)) targetCell = maze.ClosestPacmanCell(targetCell);
-                pacman.DesiredDirection = MazePathfinding.AStar(maze, pacman.Cell, targetCell, pacmanRoute: true);
-                if (trap == null && pacmanAlgorithm == NavigationAlgorithm.TravellerSalesman)
-                    pacman.DesiredDirection = MazePathfinding.AStar(maze, pacman.Cell,
-                        maze.ClosestPacmanCell(Selected.Cell), pacmanRoute: true);
-                var learned = pacmanPolicy.Predict(BuildState(pacman.Cell, targetCell), random, .08f);
-                if (CanMoveForActor(pacman, learned) && random.NextDouble() < .18) pacman.DesiredDirection = learned;
+                var trap = traps.Where(item => maze.IsChomperWalkable(item.Cell))
+                    .OrderBy(item => Manhattan(chomper.Cell, item.Cell)).FirstOrDefault();
+                var target = ghosts.Where(g => g.Alive).OrderBy(g => Manhattan(chomper.Cell, g.Cell)).FirstOrDefault();
+                Point targetCell;
+                if (chomper.PowerTime > 0f && target != null)
+                {
+                    chomper.HasObjective = false;
+                    targetCell = target.Cell;
+                }
+                else if (trap != null)
+                {
+                    chomper.HasObjective = false;
+                    targetCell = trap.Cell;
+                }
+                else
+                {
+                    var reserved = chompers
+                        .Where(other => !ReferenceEquals(other, chomper) && other.HasObjective)
+                        .Select(other => other.ObjectiveCell)
+                        .ToHashSet();
+                    if (!chomper.HasObjective || !HasChomperCollectible(chomper.ObjectiveCell)
+                        || reserved.Contains(chomper.ObjectiveCell))
+                    {
+                        chomper.ObjectiveCell = SelectChomperObjective(chomper, reserved);
+                        chomper.HasObjective = HasChomperCollectible(chomper.ObjectiveCell);
+                    }
+                    targetCell = chomper.ObjectiveCell;
+                }
+                if (!maze.IsChomperWalkable(targetCell)) targetCell = maze.ClosestChomperCell(targetCell);
+                chomper.DesiredDirection = MazePathfinding.AStar(maze, chomper.Cell, targetCell, chomperRoute: true);
+                if (chomper.PowerTime > 0f && target != null && chomperAlgorithm == NavigationAlgorithm.TravellerSalesman)
+                    chomper.DesiredDirection = MazePathfinding.AStar(maze, chomper.Cell,
+                        maze.ClosestChomperCell(Selected.Cell), chomperRoute: true);
+                var learned = chomperPolicy.Predict(BuildState(chomper.Cell, targetCell), random, .08f);
+                if (CanMoveForActor(chomper, learned) && random.NextDouble() < .05
+                    && learned != Opposite(chomper.Direction)
+                    && Manhattan(chomper.Cell + learned.Offset(), targetCell) < Manhattan(chomper.Cell, targetCell))
+                    chomper.DesiredDirection = learned;
             }
-            var speed = pacman.TrapTime > 0f ? TrappedPacmanSpeed : PacmanSpeed;
-            MoveActor(pacman, delta, speed);
+            var speed = chomper.TrapTime > 0f ? TrappedChomperSpeed : ChomperSpeed;
+            MoveActor(chomper, delta, speed);
         }
+    }
+
+    /// <summary>Ends the phase immediately when any Chomper consumes the final pebble.</summary>
+    private void EvaluatePelletGameOver()
+    {
+        if (state == GameState.Playing && maze.RemainingPelletCount() <= 0)
+            state = GameState.GameOver;
+    }
+
+    /// <summary>Checks whether a cell still contains a Chomper objective.</summary>
+    private bool HasChomperCollectible(Point cell) => maze.HasPellet(cell) || maze.HasPowerFruit(cell);
+
+    /// <summary>Selects a stable, non-reserved objective with coverage preference.</summary>
+    private Point SelectChomperObjective(Chomper chomper, ISet<Point> reserved)
+    {
+        var candidates = maze.WalkableCells()
+            .Where(HasChomperCollectible)
+            .Where(cell => !reserved.Contains(cell))
+            .ToList();
+        var outsideHouse = candidates
+            .Where(cell => Manhattan(cell, maze.GhostHouseCenter) > 4)
+            .ToList();
+        if (outsideHouse.Count > 0) candidates = outsideHouse;
+
+        var objective = candidates
+            .Select(cell => new
+            {
+                Cell = cell,
+                Score = Manhattan(chomper.Cell, cell)
+                    + (chomper.RecentCells.Contains(cell) ? 16 : 0)
+                    - Math.Min(8f, Manhattan(cell, maze.GhostHouseCenter) * .35f)
+            })
+            .OrderBy(item => item.Score)
+            .ThenBy(item => item.Cell.Y)
+            .ThenBy(item => item.Cell.X)
+            .FirstOrDefault();
+        return objective?.Cell ?? chomper.Cell;
     }
 
     /// <summary>Moves an actor one grid edge at the requested speed.</summary>
@@ -656,46 +893,49 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
             actor.Position = CellToWorld(actor.TargetCell);
             actor.Cell = actor.TargetCell;
             actor.IsMoving = false;
+            if (actor is Chomper chomper)
+            {
+                chomper.RecentCells.Enqueue(chomper.Cell);
+                while (chomper.RecentCells.Count > 12) chomper.RecentCells.Dequeue();
+            }
         }
         else actor.Position += Vector2.Normalize(offset) * travel;
     }
 
-    /// <summary>Collects pellets, power fruit, and trap fruit for live Pac-Men.</summary>
-    private void CollectPacmanItems()
+    /// <summary>Collects pellets, power fruit, and trap fruit for live Chompers.</summary>
+    private void CollectChomperItems()
     {
-        foreach (var pacman in pacmen.Where(p => p.Alive).ToList())
+        foreach (var chomper in chompers.Where(p => p.Alive).ToList())
         {
-            if (maze.ConsumePellet(pacman.Cell))
+            if (maze.ConsumePellet(chomper.Cell))
             {
-                pacman.PelletsSinceAlgorithmChange++;
+                chomper.PelletsSinceAlgorithmChange++;
                 pelletsCollected = pelletCount - maze.RemainingPelletCount();
-                if (pelletsCollected >= nextCheckpointPellets && pelletsCollected < pelletCount)
-                {
-                    checkpointRemainingPellets = maze.RemainingPellets();
-                    nextCheckpointPellets = Math.Min(pelletCount, nextCheckpointPellets + releaseThreshold);
-                }
+                chomper.HasObjective = false;
             }
-            if (maze.ConsumePowerFruit(pacman.Cell))
+            if (maze.ConsumePowerFruit(chomper.Cell))
             {
                 powerFruitTime = PowerFruitDuration;
-                pacman.PowerTime = PowerFruitDuration;
-                if (pacmen.Count == 1)
+                chomper.PowerTime = PowerFruitDuration;
+                chomper.HasObjective = false;
+                if (chompers.Count == 1)
                 {
-                    var clone = new Pacman(RetroPalette.Orange, maze.PacmanStart)
+                    var cloneStart = maze.ChomperStarts.Count > 1 ? maze.ChomperStarts[1] : maze.ChomperStart;
+                    var clone = new Chomper(RetroPalette.Orange, cloneStart)
                     {
-                        Position = CellToWorld(maze.PacmanStart),
+                        Position = CellToWorld(cloneStart),
                         DesiredDirection = MazeDirection.Left,
                         PowerTime = PowerFruitDuration
                     };
-                    pacmen.Add(clone);
+                    chompers.Add(clone);
                 }
             }
 
-            var trap = traps.FirstOrDefault(item => item.Cell == pacman.Cell);
+            var trap = traps.FirstOrDefault(item => item.Cell == chomper.Cell);
             if (trap != null)
             {
                 traps.Remove(trap);
-                pacman.TrapTime = TrapDuration;
+                chomper.TrapTime = TrapDuration;
             }
         }
     }
@@ -704,51 +944,55 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
     private void ResolveCollisions()
     {
         foreach (var ghost in ghosts.Where(g => g.Alive && g.Released).ToList())
-        foreach (var pacman in pacmen.Where(p => p.Alive).ToList())
+        foreach (var chomper in chompers.Where(p => p.Alive).ToList())
         {
-            if (Vector2.Distance(ghost.Position, pacman.Position) > TileSize * .32f) continue;
-            var relative = pacman.Cell - ghost.Cell;
+            if (Vector2.Distance(ghost.Position, chomper.Position) > TileSize * .32f) continue;
+            var relative = chomper.Cell - ghost.Cell;
             var canCapture = relative == Point.Zero || ghost.Direction == MazeDirectionExtensions.FromDelta(relative);
-            if (canCapture && pacman.IsVulnerable)
+            if (canCapture && chomper.TrapTime > 0f)
             {
-                CapturePacmanLife();
+                CaptureChomperLife();
                 return;
             }
-            else if (!pacman.IsVulnerable)
+            else if (chomper.PowerTime > 0f)
             {
                 ghost.Alive = false;
                 ghost.Released = false;
                 if (ReferenceEquals(ghost, Selected)) TransferControlAfterDeath();
+                if (ghosts.All(defeatedGhost => !defeatedGhost.Alive))
+                {
+                    allGhostsDefeated = true;
+                    state = GameState.GameOver;
+                    return;
+                }
             }
         }
     }
 
-    /// <summary>Consumes one Pac-Man life and restores the last pellet checkpoint.</summary>
-    private void CapturePacmanLife()
+    /// <summary>Consumes one Chomper life while preserving already eaten pebbles.</summary>
+    private void CaptureChomperLife()
     {
-        pacmenCaptured++;
-        pacmanLives--;
+        chompersCaptured++;
+        chomperLives--;
         score += maze.RemainingPelletCount() * 10;
 
-        foreach (var oldPacman in pacmen) oldPacman.Alive = false;
+        foreach (var oldChomper in chompers) oldChomper.Alive = false;
         traps.Clear();
         powerFruitTime = 0f;
-        maze.RestorePellets(checkpointRemainingPellets);
         pelletsCollected = pelletCount - maze.RemainingPelletCount();
-        nextCheckpointPellets = Math.Min(pelletCount, pelletsCollected + releaseThreshold);
 
-        if (pacmanLives <= 0)
+        if (chomperLives <= 0)
         {
             state = GameState.Won;
             return;
         }
 
-        pacmen.Clear();
-        var pacman = new Pacman(RetroPalette.Red, maze.PacmanStart)
+        chompers.Clear();
+        var chomper = new Chomper(RetroPalette.Red, maze.ChomperStarts[0])
         {
-            Position = CellToWorld(maze.PacmanStart)
+            Position = CellToWorld(maze.ChomperStarts[0])
         };
-        pacmen.Add(pacman);
+        chompers.Add(chomper);
 
         for (var i = 0; i < ghosts.Count; i++)
         {
@@ -783,11 +1027,11 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         }
     }
 
-    /// <summary>Finds the closest live Pac-Man cell to an origin cell.</summary>
-    private Point NearestPacman(Point origin)
+    /// <summary>Finds the closest live Chomper cell to an origin cell.</summary>
+    private Point NearestChomper(Point origin)
     {
-        var result = pacmen.Where(p => p.Alive).OrderBy(p => Manhattan(origin, p.Cell)).FirstOrDefault();
-        return result?.Cell ?? maze.PacmanStart;
+        var result = chompers.Where(p => p.Alive).OrderBy(p => Manhattan(origin, p.Cell)).FirstOrDefault();
+        return result?.Cell ?? maze.ChomperStart;
     }
 
     /// <summary>Returns Manhattan distance between two grid cells.</summary>
@@ -798,7 +1042,7 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
 
     /// <summary>Checks movement using the actor-specific ghost-house access rule.</summary>
     private bool CanMoveForActor(Actor actor, MazeDirection direction) => direction != MazeDirection.None
-        && (actor is Pacman ? maze.IsPacmanWalkable(actor.Cell + direction.Offset()) :
+        && (actor is Chomper ? maze.IsChomperWalkable(actor.Cell + direction.Offset()) :
             maze.IsWalkable(actor.Cell + direction.Offset()));
 
     /// <summary>Builds the compact state key shared by online learning policies.</summary>
@@ -833,13 +1077,13 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         GraphicsDevice.Clear(RetroPalette.Ink);
         spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp,
             transformMatrix: PresentationTransform());
-        if (state is GameState.Menu or GameState.Difficulty or GameState.Options or GameState.Controls)
+        if (state is GameState.Menu or GameState.Difficulty or GameState.Options or GameState.Controls or GameState.PauseConfirmation)
             DrawFrontEnd();
         else
         {
             DrawMaze();
             DrawTraps();
-            foreach (var pacman in pacmen.Where(p => p.Alive)) DrawPacman(pacman);
+            foreach (var chomper in chompers.Where(p => p.Alive)) DrawChomper(chomper);
             foreach (var ghost in ghosts.Where(g => g.Alive)) DrawGhost(ghost, ghost == Selected);
             DrawHud();
         }
@@ -859,54 +1103,57 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         if (state == GameState.Menu)
         {
             spriteBatch.DrawString(hudFont, GameText.Get("MenuTitle"), new Vector2(334, 122), RetroPalette.White);
-            var labels = IsMobile
-                ? new[] { "MenuPlay", "MenuDifficulty", "MenuOptions", "MenuQuit" }
-                : new[] { "MenuPlay", "MenuTwoPlayers", "MenuDifficulty", "MenuOptions", "MenuControls", "MenuQuit" };
+            var labels = new[] { "MenuOnePlayer", "MenuTwoPlayers", "MenuThreePlayers", "MenuOptions", "MenuQuit" };
             for (var i = 0; i < labels.Length; i++)
-            {
-                var label = labels[i] == "MenuTwoPlayers"
-                    ? GameText.Format("MenuTwoPlayers", twoPlayers ? GameText.Get("OptionsOn") : GameText.Get("OptionsOff"))
-                    : GameText.Get(labels[i]);
-                DrawMenuRow(label, 180 + i * 42, i == menuSelection);
-            }
+                DrawMenuRow(GameText.Get(labels[i]), 170 + i * 42, i == menuSelection);
             spriteBatch.DrawString(hudFont, GameText.Get(IsMobile ? "ControlsMobile" : "ControlsDesktop"),
-                new Vector2(170, 438), RetroPalette.Gray);
+                new Vector2(170, 420), RetroPalette.Gray);
             return;
         }
 
-        var title = state switch
-        {
-            GameState.Difficulty => "DifficultyTitle",
-            GameState.Options => "OptionsTitle",
-            _ => "ControlsTitle"
-        };
-        spriteBatch.DrawString(hudFont, GameText.Get(title), new Vector2(302, 122), RetroPalette.White);
-
         if (state == GameState.Difficulty)
         {
+            spriteBatch.DrawString(hudFont, GameText.Format("DifficultyForPlayers", playerCount),
+                new Vector2(280, 122), RetroPalette.White);
             DrawMenuRow(GameText.Get("DifficultyEasy"), 184, difficultySelection == 0);
             DrawMenuRow(GameText.Get("DifficultyNormal"), 226, difficultySelection == 1);
             DrawMenuRow(GameText.Get("DifficultyHard"), 268, difficultySelection == 2);
-            spriteBatch.DrawString(hudFont, GameText.Get("Back"), new Vector2(350, 400), RetroPalette.Gray);
+            DrawMenuRow(GameText.Get("Back"), 310, difficultySelection == 3);
         }
         else if (state == GameState.Options)
         {
+            spriteBatch.DrawString(hudFont, GameText.Get("OptionsTitle"), new Vector2(334, 122), RetroPalette.White);
             DrawMenuRow(GameText.Format("OptionsHints", hintsEnabled ? GameText.Get("OptionsOn") : GameText.Get("OptionsOff")),
                 184, optionsSelection == 0);
             DrawMenuRow(GameText.Format("OptionsFullscreen", fullscreenEnabled ? GameText.Get("OptionsOn") : GameText.Get("OptionsOff")),
                 226, optionsSelection == 1);
-            DrawMenuRow(GameText.Get("Back"), 268, optionsSelection == 2);
-            spriteBatch.DrawString(hudFont, GameText.Get("OptionsLanguage"), new Vector2(208, 380), RetroPalette.Gray);
+            DrawMenuRow(GameText.Get("MenuControls"), 268, optionsSelection == 2);
+            DrawMenuRow(GameText.Get("Back"), 310, optionsSelection == 3);
+            spriteBatch.DrawString(hudFont, GameText.Get("OptionsLanguage"), new Vector2(208, 390), RetroPalette.Gray);
+        }
+        else if (state == GameState.Controls)
+        {
+            spriteBatch.DrawString(hudFont, GameText.Get("ControlsTitle"), new Vector2(302, 122), RetroPalette.White);
+            DrawMenuRow(GameText.Format("ControlsKeyboardTrap", trapKey), 160, controlsSelection == 0);
+            DrawMenuRow(GameText.Format("ControlsGamepadGhostOne", ghostOneButton), 198, controlsSelection == 1);
+            DrawMenuRow(GameText.Format("ControlsGamepadGhostTwo", ghostTwoButton), 236, controlsSelection == 2);
+            DrawMenuRow(GameText.Format("ControlsGamepadGhostThree", ghostThreeButton), 274, controlsSelection == 3);
+            DrawMenuRow(GameText.Format("ControlsGamepadTrap", trapButton), 312, controlsSelection == 4);
+            DrawMenuRow(GameText.Format("ControlsGamepadPause", pauseButton), 350, controlsSelection == 5);
+            DrawMenuRow(GameText.Get("Back"), 388, controlsSelection == 6);
+            spriteBatch.DrawString(hudFont, GameText.Get("ControlsMove"), new Vector2(180, 426), RetroPalette.Gray);
+            var prompt = waitingForControl ? GameText.Get("ControlsPressKey") :
+                waitingForGamepad ? GameText.Get("ControlsAssignButton") : GameText.Get("ControlsConfigure");
+            spriteBatch.DrawString(hudFont, prompt, new Vector2(150, 462),
+                waitingForControl || waitingForGamepad ? RetroPalette.Yellow : RetroPalette.Gray);
         }
         else
         {
-            spriteBatch.DrawString(hudFont, GameText.Get("ControlsDesktop"), new Vector2(216, 182), RetroPalette.Cyan);
-            spriteBatch.DrawString(hudFont, GameText.Get("ControlsMove"), new Vector2(216, 224), RetroPalette.White);
-            spriteBatch.DrawString(hudFont, GameText.Get("ControlsSwitch"), new Vector2(216, 266), RetroPalette.White);
-            spriteBatch.DrawString(hudFont, GameText.Format("ControlsTrap", trapKey), new Vector2(216, 308), RetroPalette.White);
-            spriteBatch.DrawString(hudFont, waitingForControl ? GameText.Get("ControlsPressKey") : GameText.Get("ControlsConfigure"),
-                new Vector2(216, 362), waitingForControl ? RetroPalette.Yellow : RetroPalette.Gray);
-            spriteBatch.DrawString(hudFont, GameText.Get("Back"), new Vector2(350, 420), RetroPalette.Gray);
+            spriteBatch.DrawString(hudFont, GameText.Get("PauseTitle"), new Vector2(350, 122), RetroPalette.Yellow);
+            spriteBatch.DrawString(hudFont, GameText.Get("PauseQuestion"), new Vector2(205, 158), RetroPalette.White);
+            DrawMenuRow(GameText.Get("PauseSave"), 220, pauseSelection == 0);
+            DrawMenuRow(GameText.Get("PauseDiscard"), 262, pauseSelection == 1);
+            DrawMenuRow(GameText.Get("PauseCancel"), 304, pauseSelection == 2);
         }
     }
 
@@ -941,6 +1188,8 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
             }
         }
 
+        // The border is visual only. The generated ring remains walkable, so
+        // Chomper can route around the house without entering it.
         var house = new Rectangle(OriginX + (maze.GhostHouseCenter.X - 2) * TileSize,
             OriginY + (maze.GhostHouseCenter.Y - 1) * TileSize, TileSize * 5, TileSize * 3);
         Rect(house.X, house.Y, house.Width, 2, RetroPalette.Purple);
@@ -979,17 +1228,17 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
         }
     }
 
-    /// <summary>Draws a red or orange Pac-Man clone without external images.</summary>
-    private void DrawPacman(Pacman pacman)
+    /// <summary>Draws a red or orange Chomper clone without external images.</summary>
+    private void DrawChomper(Chomper chomper)
     {
-        var x = (int)pacman.Position.X;
-        var y = (int)pacman.Position.Y;
-        Rect(x - 8, y - 8, 16, 16, pacman.Color);
-        Rect(x - 5, y - 11, 10, 22, pacman.Color);
-        Rect(x - 11, y - 5, 22, 10, pacman.Color);
-        var mouth = pacman.Direction == MazeDirection.Left ? new Rectangle(x - 10, y - 2, 7, 4) :
-            pacman.Direction == MazeDirection.Up ? new Rectangle(x - 2, y - 10, 4, 7) :
-            pacman.Direction == MazeDirection.Down ? new Rectangle(x - 2, y + 3, 4, 7) :
+        var x = (int)chomper.Position.X;
+        var y = (int)chomper.Position.Y;
+        Rect(x - 8, y - 8, 16, 16, chomper.Color);
+        Rect(x - 5, y - 11, 10, 22, chomper.Color);
+        Rect(x - 11, y - 5, 22, 10, chomper.Color);
+        var mouth = chomper.Direction == MazeDirection.Left ? new Rectangle(x - 10, y - 2, 7, 4) :
+            chomper.Direction == MazeDirection.Up ? new Rectangle(x - 2, y - 10, 4, 7) :
+            chomper.Direction == MazeDirection.Down ? new Rectangle(x - 2, y + 3, 4, 7) :
             new Rectangle(x + 3, y - 2, 7, 4);
         spriteBatch.Draw(pixel, mouth, RetroPalette.Ink);
     }
@@ -1006,7 +1255,7 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
             ? GameText.Format("HudHelpersWait", releaseThreshold)
             : GameText.Get("HudHelpersReady");
         spriteBatch.DrawString(hudFont,
-            GameText.Format("HudStats", pacmanLives, pacmenCaptured, helperStatus),
+            GameText.Format("HudStats", chomperLives, chompersCaptured, helperStatus),
             new Vector2(10, 28), RetroPalette.Gray);
 
         for (var i = 0; i < ghosts.Count; i++)
@@ -1025,12 +1274,44 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
             powerFruitTime > 0 ? RetroPalette.Pink : RetroPalette.Gray);
         spriteBatch.DrawString(hudFont, GameText.Format("HudTraps", Selected.TrapFruitsRemaining),
             new Vector2(630, 28), RetroPalette.Orange);
-        if (elapsed < ReadyDelay && hintsEnabled) spriteBatch.DrawString(hudFont, GameText.Get("ReadyMessage"),
-            new Vector2(300, 250), RetroPalette.Yellow);
-        if (state == GameState.GameOver) spriteBatch.DrawString(hudFont,
-            GameText.Get("GameOverPellets"), new Vector2(215, 300), RetroPalette.Red);
-        if (state == GameState.Won) spriteBatch.DrawString(hudFont,
-            GameText.Get("WonCapture"), new Vector2(205, 300), RetroPalette.Green);
+        if (state == GameState.GameOver)
+            DrawMessageDialog(allGhostsDefeated ? "GameOverGhosts" : "GameOverPellets", RetroPalette.Red, true);
+        else if (state == GameState.Won)
+            DrawMessageDialog("WonCapture", RetroPalette.Green, true);
+        else if (elapsed < ReadyDelay && hintsEnabled)
+            DrawMessageDialog("ReadyMessage", RetroPalette.Yellow, false);
+    }
+
+    /// <summary>Draws an arcade-styled message box over the gameplay canvas.</summary>
+    private void DrawMessageDialog(string messageKey, Color accent, bool showContinue)
+    {
+        var box = showContinue
+            ? new Rectangle(132, 214, 536, 132)
+            : new Rectangle(190, 236, 420, 74);
+        Rect(box.X + 6, box.Y + 6, box.Width, box.Height, RetroPalette.Black);
+        Rect(box.X, box.Y, box.Width, box.Height, RetroPalette.Wall);
+        Rect(box.X + 4, box.Y + 4, box.Width - 8, box.Height - 8, RetroPalette.Ink);
+        Rect(box.X + 8, box.Y + 8, box.Width - 16, 3, accent);
+        Rect(box.X + 8, box.Bottom - 11, box.Width - 16, 3, accent);
+
+        var message = GameText.Get(messageKey);
+        var maxWidth = box.Width - 34;
+        var measured = hudFont.MeasureString(message);
+        var scale = Math.Min(1f, maxWidth / Math.Max(1f, measured.X));
+        var messageSize = measured * scale;
+        var messagePosition = new Vector2(
+            box.Center.X - messageSize.X / 2f,
+            box.Y + (showContinue ? 30 : 28));
+        spriteBatch.DrawString(hudFont, message, messagePosition, accent, 0f, Vector2.Zero,
+            scale, SpriteEffects.None, 0f);
+
+        if (showContinue)
+        {
+            var continueText = GameText.Get("DialogContinue");
+            var continueSize = hudFont.MeasureString(continueText);
+            spriteBatch.DrawString(hudFont, continueText,
+                new Vector2(box.Center.X - continueSize.X / 2f, box.Bottom - 34), RetroPalette.White);
+        }
     }
 
     /// <summary>Draws one solid pixel-art rectangle using the generated texture.</summary>

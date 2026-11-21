@@ -124,15 +124,18 @@
     <value>Clique em qualquer lugar</value>
   </data>
   <data name="GameTitle"><value>CHOMPER</value></data>
-  <data name="WindowTitlePlaying"><value>Chomper | FASE {0} | PONTOS {1} | VIDAS DO PAC-MAN {2}</value></data>
+  <data name="WindowTitlePlaying"><value>Chomper | FASE {0} | PONTOS {1} | VIDAS DO CHOMPER {2}</value></data>
   <data name="MenuTitle"><value>MENU PRINCIPAL</value></data>
   <data name="MenuPlay"><value>JOGAR</value></data>
-  <data name="MenuTwoPlayers"><value>DOIS JOGADORES: {0}</value></data>
+  <data name="MenuOnePlayer"><value>1 JOGADOR</value></data>
+  <data name="MenuTwoPlayers"><value>2 JOGADORES</value></data>
+  <data name="MenuThreePlayers"><value>3 JOGADORES</value></data>
   <data name="MenuDifficulty"><value>DIFICULDADE</value></data>
   <data name="MenuOptions"><value>OPÇÕES</value></data>
   <data name="MenuControls"><value>CONTROLES</value></data>
   <data name="MenuQuit"><value>SAIR</value></data>
   <data name="DifficultyTitle"><value>SELECIONE A DIFICULDADE</value></data>
+  <data name="DifficultyForPlayers"><value>DIFICULDADE - {0} JOGADORES</value></data>
   <data name="DifficultyEasy"><value>FÁCIL</value></data>
   <data name="DifficultyNormal"><value>NORMAL</value></data>
   <data name="DifficultyHard"><value>DIFÍCIL</value></data>
@@ -150,16 +153,30 @@
   <data name="ControlsTrap"><value>ARMADILHA: ESPAÇO / {0} / X</value></data>
   <data name="ControlsConfigure"><value>PRESSIONE ENTER PARA CONFIGURAR</value></data>
   <data name="ControlsPressKey"><value>PRESSIONE UMA TECLA (CONFIGURAÇÃO DEMO)</value></data>
+  <data name="ControlsKeyboardTrap"><value>ARMADILHA TECLADO: {0}</value></data>
+  <data name="ControlsGamepadGhostOne"><value>GAMEPAD FANTASMA 1: {0}</value></data>
+  <data name="ControlsGamepadGhostTwo"><value>GAMEPAD FANTASMA 2: {0}</value></data>
+  <data name="ControlsGamepadGhostThree"><value>GAMEPAD FANTASMA 3: {0}</value></data>
+  <data name="ControlsGamepadTrap"><value>ARMADILHA GAMEPAD: {0}</value></data>
+  <data name="ControlsGamepadPause"><value>PAUSA GAMEPAD: {0}</value></data>
+  <data name="ControlsAssignButton"><value>ENTER, DEPOIS PRESSIONE UM BOTÃO DO GAMEPAD</value></data>
   <data name="Back"><value>VOLTAR</value></data>
   <data name="HudTop"><value>FASE {0}   PEBBLES: {1}   PONTOS: {2:00000}</value></data>
-  <data name="HudStats"><value>VIDAS PAC-MAN: {0}   CAPTURAS: {1}/3   {2}</value></data>
+  <data name="HudStats"><value>VIDAS CHOMPER: {0}   CAPTURAS: {1}/3   {2}</value></data>
   <data name="HudHelpersWait"><value>AJUDANTES: AGUARDAM {0} PEBBLES</value></data>
   <data name="HudHelpersReady"><value>AJUDANTES: LIBERADOS</value></data>
-  <data name="HudPower"><value>FRUTA: {0:0.0}s  PAC-MAN DUPLICADO</value></data>
+  <data name="HudPower"><value>FRUTA: {0:0.0}s  CHOMPER DUPLICADO</value></data>
   <data name="HudDesktop"><value>1/2/3: TROCAR   ESPAÇO/F: ARMADILHA</value></data>
   <data name="HudMobile"><value>MOBILE: ARRASTE / TOQUE DUPLO / SEGURE</value></data>
   <data name="HudTraps"><value>ARMADILHAS: {0}</value></data>
   <data name="ReadyMessage"><value>SAIA DA JAULA DOS FANTASMAS!</value></data>
-  <data name="GameOverPellets"><value>PAC-MAN COMEU TODAS AS PEBBLES - FIM DE JOGO</value></data>
-  <data name="WonCapture"><value>PAC-MAN CAPTURADO 3 VEZES! ENTER PARA A PRÓXIMA FASE</value></data>
+  <data name="GameOverPellets"><value>CHOMPER COMEU TODAS AS PEBBLES - FIM DE JOGO</value></data>
+  <data name="GameOverGhosts"><value>CHOMPER DERROTOU OS 3 FANTASMAS - FIM DE JOGO</value></data>
+  <data name="WonCapture"><value>CHOMPER CAPTURADO 3 VEZES! ENTER PARA A PRÓXIMA FASE</value></data>
+  <data name="PauseTitle"><value>PAUSA</value></data>
+  <data name="PauseQuestion"><value>SALVAR PROGRESSO E VOLTAR AO MENU?</value></data>
+  <data name="PauseSave"><value>SALVAR E IR AO MENU</value></data>
+  <data name="PauseDiscard"><value>MENU SEM SALVAR</value></data>
+  <data name="PauseCancel"><value>CONTINUAR JOGO</value></data>
+  <data name="DialogContinue"><value>ENTER / TOQUE PARA CONTINUAR</value></data>
 </root>
