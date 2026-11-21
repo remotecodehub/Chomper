@@ -1303,8 +1303,10 @@ public sealed class ChomperGame : Microsoft.Xna.Framework.Game
             GameText.Get(IsMobile ? "HudMobile" : "HudDesktop");
         spriteBatch.DrawString(hudFont, status, new Vector2(190, 48),
             powerFruitTime > 0 ? RetroPalette.Pink : RetroPalette.Gray);
+        // Keep the trap counter on the third HUD line so it cannot overlap the
+        // helper status that occupies the second line in localized layouts.
         spriteBatch.DrawString(hudFont, GameText.Format("HudTraps", Selected.TrapFruitsRemaining),
-            new Vector2(630, 28), RetroPalette.Orange);
+            new Vector2(630, 48), RetroPalette.Orange);
         if (state == GameState.GameOver)
             DrawMessageDialog(allGhostsDefeated ? "GameOverGhosts" : "GameOverPellets", RetroPalette.Red, true);
         else if (state == GameState.Won)
